@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${SQL_DB_NAME:-thu_vien_sis}
+      POSTGRES_USER: ${SQL_USER:-sis_app}
+      POSTGRES_PASSWORD: ${SQL_PASSWORD:?Vui lòng thiết lập SQL_PASSWORD trong .env}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - sis_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SQL_USER:-sis_app} -d ${SQL_DB_NAME:-thu_vien_sis}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sis_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: sis-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - sis_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sis_net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sis-web-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      APP_URL: ${APP_URL:-https://thuviensis.vn}
+      SQL_HOST: postgres
+      SQL_PORT: 5432
+      SQL_DB_NAME: ${SQL_DB_NAME:-thu_vien_sis}
+      SQL_USER: ${SQL_USER:-sis_app}
+      SQL_PASSWORD: ${SQL_PASSWORD:?Vui lòng thiết lập SQL_PASSWORD trong .env}
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      REDIS_URL: redis://redis:6379
+      SESSION_SECRET: ${SESSION_SECRET:?Vui lòng thiết lập SESSION_SECRET tối thiểu 32 ký tự}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-haduyen980213@gmail.com}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-vietqr_webhook}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
+      VIETQR_BANK_BIN: ${VIETQR_BANK_BIN:-970443}
+      VIETQR_ACCOUNT_NO: ${VIETQR_ACCOUNT_NO:-0946265256}
+      VIETQR_ACCOUNT_NAME: ${VIETQR_ACCOUNT_NAME:-THU VIEN SIS}
+    volumes:
+      - sis_storage:/app/storage
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - sis_net
+
+volumes:
+  sis_pgdata:
+  sis_redis:
+  sis_storage:
+
+networks:
+  sis_net:
+    driver: bridge

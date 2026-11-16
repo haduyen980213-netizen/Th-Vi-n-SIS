@@ -1,0 +1,6 @@
+{
+  "name": "THƯ VIỆN SIS",
+  "description": "SIS Digital Library — Marketplace bản vẽ kỹ thuật, hồ sơ thiết kế, tài liệu xây dựng và mô hình 3D chuyên nghiệp tại Việt Nam.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
