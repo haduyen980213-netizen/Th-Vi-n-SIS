@@ -17,7 +17,9 @@ export const createPool = () => {
       !isUnixSocket &&
       (process.env.SQL_SSL === 'true' ||
         process.env.SQL_SSL === 'require' ||
-        process.env.VERCEL === '1');
+        process.env.VERCEL === '1' ||
+        Boolean(process.env.SQL_HOST?.includes('neon.tech')) ||
+        Boolean(process.env.SQL_HOST?.includes('supabase.')));
 
     global._postgresPool = new Pool({
       host: process.env.SQL_HOST,
