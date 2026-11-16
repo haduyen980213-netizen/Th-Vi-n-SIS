@@ -157,7 +157,7 @@ async function runSeed(): Promise<void> {
     });
 
   // 4b. Ensure primary Admin / Super Admin account (quanly@nhavang.com) exists idempotently
-  await ensureMasterAdminAccount(roleMap);
+  const masterAdminSellerId = await ensureMasterAdminAccount(roleMap);
 
   // 5. Check if products already seeded
   const [{ total }] = await db.select({ total: count() }).from(products);
@@ -526,8 +526,10 @@ async function runSeed(): Promise<void> {
 
   for (const p of productSeeds) {
     const categoryId = catMap.get(p.categorySlug);
-    const sellerId = sellerIds[p.sellerIdx];
+    const sellerId = masterAdminSellerId || sellerIds[p.sellerIdx];
     if (!categoryId || !sellerId) continue;
+
+    const tagsWithFree = Array.from(new Set([...p.tags, 'mien-phi-tham-khao']));
 
     const [createdProduct] = await db
       .insert(products)
@@ -539,8 +541,8 @@ async function runSeed(): Promise<void> {
         description: p.description,
         categoryId,
         sellerId,
-        listedPriceVnd: p.listedPriceVnd,
-        isFree: p.isFree,
+        listedPriceVnd: 0,
+        isFree: true,
         fileFormat: p.fileFormat,
         softwareVersion: p.softwareVersion,
         fileSizeBytes: p.fileSizeBytes,
@@ -592,7 +594,7 @@ async function runSeed(): Promise<void> {
       fileId: createdFile.id,
     });
 
-    for (const tagSlug of p.tags) {
+    for (const tagSlug of tagsWithFree) {
       const tId = tagMap.get(tagSlug);
       if (tId) {
         await db
@@ -604,7 +606,7 @@ async function runSeed(): Promise<void> {
   }
 }
 
-async function ensureMasterAdminAccount(roleMap: Map<string, number>): Promise<void> {
+async function ensureMasterAdminAccount(roleMap: Map<string, number>): Promise<number | null> {
   const email = 'quanly@nhavang.com';
   const defaultPassword = 'nhavang256@';
   const unlimitedBalanceVnd = 2_000_000_000;
@@ -647,7 +649,7 @@ async function ensureMasterAdminAccount(roleMap: Map<string, number>): Promise<v
     adminUser = updated;
   }
 
-  if (!adminUser) return;
+  if (!adminUser) return null;
 
   await db
     .insert(userProfiles)
@@ -676,7 +678,7 @@ async function ensureMasterAdminAccount(roleMap: Map<string, number>): Promise<v
     .insert(sellers)
     .values({
       userId: adminUser.id,
-      displayName: 'Nhà Vàng Official Store',
+      displayName: 'Quản trị Hệ thống Nhà Vàng',
       slug: 'nha-vang-official',
       specialty: 'Kho Dữ liệu Kỹ thuật Tổng hợp',
       bio: 'Tài khoản quản trị viên toàn hệ thống THƯ VIỆN SIS.',
@@ -758,4 +760,6 @@ async function ensureMasterAdminAccount(roleMap: Map<string, number>): Promise<v
       });
     }
   }
+
+  return effectiveSeller ? effectiveSeller.id : null;
 }
