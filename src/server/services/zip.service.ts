@@ -103,7 +103,9 @@ export function createZipBuffer(entries: ZipEntryInput[]): Buffer {
   return Buffer.concat([...localParts, centralDirBuf, endRecord]);
 }
 
-const PRIVATE_VAULT_DIR = path.resolve(process.cwd(), 'storage', 'private-vault');
+const PRIVATE_VAULT_DIR = process.env.VERCEL
+  ? path.resolve('/tmp', 'sis-storage', 'private-vault')
+  : path.resolve(process.cwd(), 'storage', 'private-vault');
 
 export function resolvePrivateVaultPath(storageKey: string): string {
   const normalized = path.normalize(storageKey).replace(/^(\.\.[/\\])+/, '');

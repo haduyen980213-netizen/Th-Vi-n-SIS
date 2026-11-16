@@ -26,7 +26,9 @@ import {
 } from '../../db/schema.ts';
 import { resolvePrivateVaultPath } from './zip.service.ts';
 
-const PUBLIC_PREVIEW_DIR = path.resolve(process.cwd(), 'storage', 'public-previews');
+const PUBLIC_PREVIEW_DIR = process.env.VERCEL
+  ? path.resolve('/tmp', 'sis-storage', 'public-previews')
+  : path.resolve(process.cwd(), 'storage', 'public-previews');
 
 const ALLOWED_DRAWING_EXTS = new Set([
   '.zip',
