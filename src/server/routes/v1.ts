@@ -72,10 +72,14 @@ import {
   upsertAccountCustomPrice,
 } from '../services/pricing.service.ts';
 import {
+  adjustUserWalletByAdmin,
   AdminServiceError,
+  createAdminUser,
   deleteAdminBanner,
   getAdminAnalyticsReport,
+  getAdminUserDetail,
   getPublicCmsHomeData,
+  grantUserDrawingEntitlementByAdmin,
   listAdminAndAuditLogs,
   listAdminBanners,
   listAdminCategories,
@@ -83,8 +87,10 @@ import {
   listAdminSupportTickets,
   listAdminUsers,
   listAllRbacRoles,
+  sendAdminDirectSupportToUser,
   updateAdminCategory,
   updateAdminSupportTicket,
+  updateAdminUserProfileAndSecurity,
   updateAdminUserRolesAndStatus,
   upsertAdminBanner,
   upsertSiteSettingsBatch,
@@ -2941,13 +2947,102 @@ router.get(
     try {
       const q = typeof req.query.q === 'string' ? req.query.q : '';
       const status = typeof req.query.status === 'string' ? req.query.status : 'ALL';
-      const rows = await listAdminUsers({ q, status });
-      return res.json({ success: true, data: rows });
+      const role = typeof req.query.role === 'string' ? req.query.role : 'ALL';
+      const page = Number(req.query.page) || 1;
+      const limit = Number(req.query.limit) || 50;
+      const data = await listAdminUsers({ q, status, role, page, limit });
+      return res.json({ success: true, data });
     } catch (err) {
       console.error('Admin users list error:', err);
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Không thể tải danh sách thành viên.' },
+      });
+    }
+  }
+);
+
+router.post(
+  '/admin/users',
+  requireAuth,
+  requireRoles('ADMIN', 'SUPER_ADMIN'),
+  async (req: AuthRequest, res) => {
+    const schema = z.object({
+      fullName: z.string().trim().min(2, 'Họ tên tối thiểu 2 ký tự').max(120),
+      email: z.string().trim().email('Email không hợp lệ').toLowerCase(),
+      phone: z
+        .string()
+        .trim()
+        .regex(/^(0|\+84)[0-9]{8,10}$/, 'Số điện thoại Việt Nam không hợp lệ')
+        .nullable()
+        .optional(),
+      password: z.string().min(6, 'Mật khẩu tối thiểu 6 ký tự').max(128),
+      roleCodes: z.array(z.string().min(2)).optional(),
+      initialWalletVnd: z.number().int().min(0).max(2_000_000_000).optional(),
+      emailVerified: z.boolean().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message || 'Thông tin tạo tài khoản không hợp lệ.',
+        },
+      });
+    }
+
+    try {
+      const created = await createAdminUser({
+        actorUserId: req.authUser!.id,
+        actorRoles: req.authUser!.roles,
+        ...parsed.data,
+        ipAddress: req.ip || null,
+      });
+      return res.status(201).json({ success: true, data: created });
+    } catch (err: any) {
+      if (err instanceof AdminServiceError) {
+        return res.status(err.status).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      console.error('Create admin user error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Không thể tạo tài khoản thành viên.' },
+      });
+    }
+  }
+);
+
+router.get(
+  '/admin/users/:id/detail',
+  requireAuth,
+  requireRoles('ADMIN', 'SUPER_ADMIN'),
+  async (req, res) => {
+    const targetUserId = Number(req.params.id);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_ID', message: 'Mã thành viên không hợp lệ.' },
+      });
+    }
+
+    try {
+      const detail = await getAdminUserDetail(targetUserId);
+      return res.json({ success: true, data: detail });
+    } catch (err: any) {
+      if (err instanceof AdminServiceError) {
+        return res.status(err.status).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      console.error('Get admin user detail error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Không thể tải hồ sơ chi tiết thành viên.' },
       });
     }
   }
@@ -3001,6 +3096,237 @@ router.patch(
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Không thể cập nhật phân quyền thành viên.' },
+      });
+    }
+  }
+);
+
+router.patch(
+  '/admin/users/:id/profile',
+  requireAuth,
+  requireRoles('ADMIN', 'SUPER_ADMIN'),
+  async (req: AuthRequest, res) => {
+    const targetUserId = Number(req.params.id);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_ID', message: 'Mã thành viên không hợp lệ.' },
+      });
+    }
+
+    const schema = z.object({
+      fullName: z.string().trim().min(2).max(120).optional(),
+      phone: z
+        .string()
+        .trim()
+        .regex(/^(0|\+84)[0-9]{8,10}$/, 'Số điện thoại Việt Nam không hợp lệ')
+        .nullable()
+        .optional(),
+      emailVerified: z.boolean().optional(),
+      companyName: z.string().trim().max(150).nullable().optional(),
+      jobTitle: z.string().trim().max(100).nullable().optional(),
+      address: z.string().trim().max(255).nullable().optional(),
+      city: z.string().trim().max(80).nullable().optional(),
+      newPassword: z.string().min(6, 'Mật khẩu mới tối thiểu 6 ký tự').max(128).optional(),
+      revokeSessions: z.boolean().optional(),
+      reason: z.string().trim().max(300).nullable().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message || 'Thông tin hỗ trợ cập nhật không hợp lệ.',
+        },
+      });
+    }
+
+    try {
+      const result = await updateAdminUserProfileAndSecurity({
+        actorUserId: req.authUser!.id,
+        actorRoles: req.authUser!.roles,
+        targetUserId,
+        ...parsed.data,
+        ipAddress: req.ip || null,
+      });
+      return res.json({ success: true, data: result });
+    } catch (err: any) {
+      if (err instanceof AdminServiceError) {
+        return res.status(err.status).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      console.error('Assist update user profile error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Không thể hỗ trợ cập nhật tài khoản.' },
+      });
+    }
+  }
+);
+
+router.post(
+  '/admin/users/:id/wallet-adjust',
+  requireAuth,
+  requireRoles('ADMIN', 'SUPER_ADMIN', 'ACCOUNTANT'),
+  async (req: AuthRequest, res) => {
+    const targetUserId = Number(req.params.id);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_ID', message: 'Mã thành viên không hợp lệ.' },
+      });
+    }
+
+    const schema = z.object({
+      direction: z.enum(['CREDIT', 'DEBIT']),
+      amountVnd: z.number().int().min(1000, 'Số tiền tối thiểu 1.000 ₫').max(2_000_000_000),
+      reason: z.string().trim().min(3, 'Vui lòng nhập lý do điều chỉnh ví').max(300),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message || 'Dữ liệu điều chỉnh ví không hợp lệ.',
+        },
+      });
+    }
+
+    try {
+      const result = await adjustUserWalletByAdmin({
+        actorUserId: req.authUser!.id,
+        targetUserId,
+        direction: parsed.data.direction,
+        amountVnd: parsed.data.amountVnd,
+        reason: parsed.data.reason,
+        ipAddress: req.ip || null,
+      });
+      return res.json({ success: true, data: result });
+    } catch (err: any) {
+      if (err instanceof AdminServiceError) {
+        return res.status(err.status).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      console.error('Admin wallet adjust error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Không thể điều chỉnh ví thành viên.' },
+      });
+    }
+  }
+);
+
+router.post(
+  '/admin/users/:id/grant-entitlement',
+  requireAuth,
+  requireRoles('ADMIN', 'SUPER_ADMIN'),
+  async (req: AuthRequest, res) => {
+    const targetUserId = Number(req.params.id);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_ID', message: 'Mã thành viên không hợp lệ.' },
+      });
+    }
+
+    const schema = z.object({
+      productId: z.number().int().positive('Vui lòng chọn hồ sơ bản vẽ'),
+      additionalDownloads: z.number().int().min(1).max(100).optional(),
+      reason: z.string().trim().max(300).nullable().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message || 'Thông tin cấp quyền tải không hợp lệ.',
+        },
+      });
+    }
+
+    try {
+      const ent = await grantUserDrawingEntitlementByAdmin({
+        actorUserId: req.authUser!.id,
+        targetUserId,
+        productId: parsed.data.productId,
+        additionalDownloads: parsed.data.additionalDownloads,
+        reason: parsed.data.reason ?? null,
+        ipAddress: req.ip || null,
+      });
+      return res.json({ success: true, data: ent });
+    } catch (err: any) {
+      if (err instanceof AdminServiceError) {
+        return res.status(err.status).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      console.error('Grant entitlement error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Không thể cấp quyền tải bản vẽ.' },
+      });
+    }
+  }
+);
+
+router.post(
+  '/admin/users/:id/support-message',
+  requireAuth,
+  requireRoles('ADMIN', 'SUPER_ADMIN', 'MODERATOR'),
+  async (req: AuthRequest, res) => {
+    const targetUserId = Number(req.params.id);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_ID', message: 'Mã thành viên không hợp lệ.' },
+      });
+    }
+
+    const schema = z.object({
+      title: z.string().trim().min(3, 'Tiêu đề tối thiểu 3 ký tự').max(150),
+      message: z.string().trim().min(5, 'Nội dung hỗ trợ tối thiểu 5 ký tự').max(1500),
+      createTicketLog: z.boolean().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message || 'Nội dung hỗ trợ không hợp lệ.',
+        },
+      });
+    }
+
+    try {
+      const result = await sendAdminDirectSupportToUser({
+        actorUserId: req.authUser!.id,
+        targetUserId,
+        title: parsed.data.title,
+        message: parsed.data.message,
+        createTicketLog: parsed.data.createTicketLog,
+        ipAddress: req.ip || null,
+      });
+      return res.status(201).json({ success: true, data: result });
+    } catch (err: any) {
+      if (err instanceof AdminServiceError) {
+        return res.status(err.status).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      console.error('Send direct support message error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Không thể gửi tin nhắn hỗ trợ.' },
       });
     }
   }

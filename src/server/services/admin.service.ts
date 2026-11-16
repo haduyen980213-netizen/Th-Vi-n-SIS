@@ -1,10 +1,13 @@
-import { and, asc, count, desc, eq, ilike, isNull, ne, or, sql } from 'drizzle-orm';
+import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
+import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from '../../db/index.ts';
 import {
   adminLogs,
   auditLogs,
   banners,
   categories,
+  downloadEntitlements,
   notifications,
   orderItems,
   orders,
@@ -14,10 +17,13 @@ import {
   siteSettings,
   supportTickets,
   topupOrders,
+  userProductPrices,
+  userProfiles,
   userRoles,
   userSessions,
   users,
   wallets,
+  walletTransactions,
 } from '../../db/schema.ts';
 
 export class AdminServiceError extends Error {
@@ -139,8 +145,19 @@ export async function listAllRbacRoles() {
   return db.select().from(roles).orderBy(asc(roles.id));
 }
 
-export async function listAdminUsers(params: { q?: string; status?: string }) {
+export async function listAdminUsers(params: {
+  q?: string;
+  status?: string;
+  role?: string;
+  page?: number;
+  limit?: number;
+}) {
   const q = params.q?.trim();
+  const roleFilter = params.role?.trim().toUpperCase();
+  const page = Math.max(1, Number(params.page) || 1);
+  const limit = Math.min(200, Math.max(1, Number(params.limit) || 50));
+  const offset = (page - 1) * limit;
+
   const conditions = [isNull(users.deletedAt)];
 
   if (q) {
@@ -156,43 +173,830 @@ export async function listAdminUsers(params: { q?: string; status?: string }) {
   if (params.status && params.status !== 'ALL') {
     conditions.push(eq(users.status, params.status));
   }
+  if (roleFilter && roleFilter !== 'ALL') {
+    const roleMatches = await db
+      .select({ userId: userRoles.userId })
+      .from(userRoles)
+      .innerJoin(roles, eq(userRoles.roleId, roles.id))
+      .where(eq(roles.code, roleFilter));
+    const matchedIds = roleMatches.map((r) => r.userId);
+    if (matchedIds.length === 0) {
+      const [
+        [{ totalAll }],
+        [{ activeAll }],
+        [{ lockedAll }],
+        [{ sellersAll }],
+      ] = await Promise.all([
+        db.select({ totalAll: count() }).from(users).where(isNull(users.deletedAt)),
+        db.select({ activeAll: count() }).from(users).where(and(isNull(users.deletedAt), eq(users.status, 'ACTIVE'))),
+        db.select({ lockedAll: count() }).from(users).where(and(isNull(users.deletedAt), eq(users.status, 'LOCKED'))),
+        db.select({ sellersAll: count() }).from(sellers),
+      ]);
+      return {
+        items: [],
+        summary: {
+          total: Number(totalAll),
+          active: Number(activeAll),
+          locked: Number(lockedAll),
+          sellers: Number(sellersAll),
+        },
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      };
+    }
+    conditions.push(inArray(users.id, matchedIds));
+  }
 
-  const userRows = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      phone: users.phone,
-      fullName: users.fullName,
-      status: users.status,
-      emailVerified: users.emailVerified,
-      lastLoginAt: users.lastLoginAt,
-      createdAt: users.createdAt,
-      walletBalanceVnd: wallets.availableBalanceVnd,
-      sellerDisplayName: sellers.displayName,
-    })
+  const [
+    [{ totalFiltered }],
+    [{ totalAll }],
+    [{ activeAll }],
+    [{ lockedAll }],
+    [{ sellersAll }],
+    userRows,
+  ] = await Promise.all([
+    db.select({ totalFiltered: count() }).from(users).where(and(...conditions)),
+    db.select({ totalAll: count() }).from(users).where(isNull(users.deletedAt)),
+    db.select({ activeAll: count() }).from(users).where(and(isNull(users.deletedAt), eq(users.status, 'ACTIVE'))),
+    db.select({ lockedAll: count() }).from(users).where(and(isNull(users.deletedAt), eq(users.status, 'LOCKED'))),
+    db.select({ sellersAll: count() }).from(sellers),
+    db
+      .select({
+        id: users.id,
+        email: users.email,
+        phone: users.phone,
+        fullName: users.fullName,
+        status: users.status,
+        emailVerified: users.emailVerified,
+        lastLoginAt: users.lastLoginAt,
+        createdAt: users.createdAt,
+        walletBalanceVnd: wallets.availableBalanceVnd,
+        sellerDisplayName: sellers.displayName,
+      })
+      .from(users)
+      .leftJoin(wallets, eq(users.id, wallets.userId))
+      .leftJoin(sellers, eq(users.id, sellers.userId))
+      .where(and(...conditions))
+      .orderBy(desc(users.createdAt), desc(users.id))
+      .limit(limit)
+      .offset(offset),
+  ]);
+
+  const userIds = userRows.map((u) => u.id);
+  const roleRows =
+    userIds.length > 0
+      ? await db
+          .select({
+            userId: userRoles.userId,
+            roleCode: roles.code,
+          })
+          .from(userRoles)
+          .innerJoin(roles, eq(userRoles.roleId, roles.id))
+          .where(inArray(userRoles.userId, userIds))
+      : [];
+
+  return {
+    items: userRows.map((u) => ({
+      ...u,
+      walletBalanceVnd: u.walletBalanceVnd ?? 0,
+      roles: roleRows.filter((r) => r.userId === u.id).map((r) => r.roleCode),
+    })),
+    summary: {
+      total: Number(totalAll),
+      active: Number(activeAll),
+      locked: Number(lockedAll),
+      sellers: Number(sellersAll),
+    },
+    pagination: {
+      page,
+      limit,
+      total: Number(totalFiltered),
+      totalPages: Math.max(1, Math.ceil(Number(totalFiltered) / limit)),
+    },
+  };
+}
+
+export async function createAdminUser(params: {
+  actorUserId: number;
+  actorRoles: string[];
+  fullName: string;
+  email: string;
+  phone?: string | null;
+  password: string;
+  roleCodes?: string[];
+  initialWalletVnd?: number;
+  emailVerified?: boolean;
+  ipAddress?: string | null;
+}) {
+  const actorIsSuperAdmin = params.actorRoles.includes('SUPER_ADMIN');
+  const emailNormalized = params.email.trim().toLowerCase();
+  const phoneNormalized = params.phone?.trim() || null;
+  const initialBalance = Math.max(0, Math.round(Number(params.initialWalletVnd) || 0));
+
+  const requestedRoles = Array.from(
+    new Set((params.roleCodes && params.roleCodes.length > 0 ? params.roleCodes : ['MEMBER']).map((r) => r.toUpperCase()))
+  );
+  if (!requestedRoles.includes('MEMBER')) {
+    requestedRoles.push('MEMBER');
+  }
+  if (requestedRoles.includes('SUPER_ADMIN') && !actorIsSuperAdmin) {
+    throw new AdminServiceError(
+      'FORBIDDEN_SUPER_ADMIN',
+      'Chỉ SUPER_ADMIN mới có quyền tạo tài khoản có vai trò SUPER_ADMIN.',
+      403
+    );
+  }
+
+  const passwordHash = await bcrypt.hash(params.password, 12);
+
+  return db.transaction(async (tx) => {
+    const existing = await tx
+      .select({ id: users.id, email: users.email, phone: users.phone })
+      .from(users)
+      .where(
+        phoneNormalized
+          ? or(eq(users.email, emailNormalized), eq(users.phone, phoneNormalized))!
+          : eq(users.email, emailNormalized)
+      )
+      .limit(1);
+
+    if (existing.length > 0) {
+      throw new AdminServiceError(
+        'ACCOUNT_EXISTS',
+        existing[0].email === emailNormalized
+          ? 'Email này đã được sử dụng.'
+          : 'Số điện thoại này đã được đăng ký.',
+        409
+      );
+    }
+
+    const uid = `local_${crypto.randomBytes(12).toString('hex')}`;
+    const [created] = await tx
+      .insert(users)
+      .values({
+        uid,
+        email: emailNormalized,
+        phone: phoneNormalized,
+        passwordHash,
+        fullName: params.fullName.trim(),
+        emailVerified: params.emailVerified ?? true,
+        status: 'ACTIVE',
+      })
+      .returning();
+
+    await tx.insert(userProfiles).values({ userId: created.id });
+
+    const [wallet] = await tx
+      .insert(wallets)
+      .values({
+        userId: created.id,
+        availableBalanceVnd: initialBalance,
+        pendingBalanceVnd: 0,
+        totalDepositedVnd: initialBalance,
+        totalSpentVnd: 0,
+        currency: 'VND',
+      })
+      .returning();
+
+    if (initialBalance > 0) {
+      const txCode = `TX-ADM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      await tx.insert(walletTransactions).values({
+        txCode,
+        walletId: wallet.id,
+        userId: created.id,
+        txType: 'ADMIN_ADJUST',
+        direction: 'CREDIT',
+        amountVnd: initialBalance,
+        balanceBeforeVnd: 0,
+        balanceAfterVnd: initialBalance,
+        status: 'COMPLETED',
+        source: 'ADMIN_PANEL',
+        referenceCode: `INIT-${created.id}`,
+        description: 'Cấp số dư khởi tạo khi quản trị viên tạo tài khoản',
+      });
+    }
+
+    const allRoles = await tx.select().from(roles);
+    const roleMap = new Map(allRoles.map((r) => [r.code, r.id]));
+    for (const code of requestedRoles) {
+      const roleId = roleMap.get(code);
+      if (!roleId) {
+        throw new AdminServiceError('INVALID_ROLE', `Vai trò ${code} không tồn tại.`, 400);
+      }
+      await tx.insert(userRoles).values({
+        userId: created.id,
+        roleId,
+        assignedBy: params.actorUserId,
+      });
+    }
+
+    await tx.insert(adminLogs).values({
+      adminUserId: params.actorUserId,
+      action: 'ADMIN_USER_CREATED',
+      targetType: 'USER',
+      targetId: String(created.id),
+      detailsJson: {
+        email: created.email,
+        roles: requestedRoles,
+        initialWalletVnd: initialBalance,
+      },
+      ipAddress: params.ipAddress || null,
+    });
+
+    await tx.insert(notifications).values({
+      userId: created.id,
+      type: 'SYSTEM',
+      title: 'Chào mừng đến với THƯ VIỆN SIS',
+      body: 'Tài khoản của bạn đã được quản trị viên khởi tạo và kích hoạt.',
+      linkUrl: '/tai-khoan',
+    });
+
+    return {
+      id: created.id,
+      email: created.email,
+      fullName: created.fullName,
+      roles: requestedRoles,
+      walletBalanceVnd: initialBalance,
+    };
+  });
+}
+
+export async function getAdminUserDetail(targetUserId: number) {
+  const [userRow] = await db
+    .select()
     .from(users)
-    .leftJoin(wallets, eq(users.id, wallets.userId))
-    .leftJoin(sellers, eq(users.id, sellers.userId))
-    .where(and(...conditions))
-    .orderBy(desc(users.createdAt))
-    .limit(80);
+    .where(and(eq(users.id, targetUserId), isNull(users.deletedAt)))
+    .limit(1);
 
-  if (userRows.length === 0) return [];
+  if (!userRow) {
+    throw new AdminServiceError('USER_NOT_FOUND', 'Không tìm thấy tài khoản thành viên.', 404);
+  }
 
-  const roleRows = await db
-    .select({
-      userId: userRoles.userId,
-      roleCode: roles.code,
-      roleName: roles.name,
-    })
-    .from(userRoles)
-    .innerJoin(roles, eq(userRoles.roleId, roles.id));
+  const [
+    profileRows,
+    roleRows,
+    sellerRows,
+    walletRows,
+    txRows,
+    orderRows,
+    entitlementRows,
+    customPriceRows,
+    ticketRows,
+    [{ activeSessionsCount }],
+  ] = await Promise.all([
+    db.select().from(userProfiles).where(eq(userProfiles.userId, targetUserId)).limit(1),
+    db
+      .select({ code: roles.code })
+      .from(userRoles)
+      .innerJoin(roles, eq(userRoles.roleId, roles.id))
+      .where(eq(userRoles.userId, targetUserId)),
+    db.select().from(sellers).where(eq(sellers.userId, targetUserId)).limit(1),
+    db.select().from(wallets).where(eq(wallets.userId, targetUserId)).limit(1),
+    db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.userId, targetUserId))
+      .orderBy(desc(walletTransactions.createdAt))
+      .limit(12),
+    db
+      .select({
+        id: orders.id,
+        orderCode: orders.orderCode,
+        totalAmountVnd: orders.totalAmountVnd,
+        status: orders.status,
+        paidAt: orders.paidAt,
+        createdAt: orders.createdAt,
+      })
+      .from(orders)
+      .where(eq(orders.buyerId, targetUserId))
+      .orderBy(desc(orders.createdAt))
+      .limit(10),
+    db
+      .select({
+        id: downloadEntitlements.id,
+        productId: downloadEntitlements.productId,
+        productCode: products.code,
+        productSlug: products.slug,
+        productTitle: products.title,
+        downloadsUsed: downloadEntitlements.downloadsUsed,
+        maxDownloads: downloadEntitlements.maxDownloads,
+        isRevoked: downloadEntitlements.isRevoked,
+        grantedAt: downloadEntitlements.grantedAt,
+      })
+      .from(downloadEntitlements)
+      .innerJoin(products, eq(downloadEntitlements.productId, products.id))
+      .where(eq(downloadEntitlements.userId, targetUserId))
+      .orderBy(desc(downloadEntitlements.grantedAt))
+      .limit(30),
+    db
+      .select({
+        id: userProductPrices.id,
+        productId: userProductPrices.productId,
+        productCode: products.code,
+        productTitle: products.title,
+        listedPriceVnd: products.listedPriceVnd,
+        customPriceVnd: userProductPrices.customPriceVnd,
+        isActive: userProductPrices.isActive,
+      })
+      .from(userProductPrices)
+      .innerJoin(products, eq(userProductPrices.productId, products.id))
+      .where(eq(userProductPrices.userId, targetUserId))
+      .orderBy(desc(userProductPrices.updatedAt))
+      .limit(20),
+    db
+      .select()
+      .from(supportTickets)
+      .where(
+        or(
+          eq(supportTickets.userId, targetUserId),
+          eq(supportTickets.contactEmail, userRow.email)
+        )!
+      )
+      .orderBy(desc(supportTickets.createdAt))
+      .limit(20),
+    db
+      .select({ activeSessionsCount: count() })
+      .from(userSessions)
+      .where(
+        and(
+          eq(userSessions.userId, targetUserId),
+          isNull(userSessions.revokedAt),
+          sql`${userSessions.expiresAt} > NOW()`
+        )
+      ),
+  ]);
 
-  return userRows.map((u) => ({
-    ...u,
-    walletBalanceVnd: u.walletBalanceVnd ?? 0,
-    roles: roleRows.filter((r) => r.userId === u.id).map((r) => r.roleCode),
-  }));
+  const wallet = walletRows[0] || {
+    availableBalanceVnd: 0,
+    pendingBalanceVnd: 0,
+    totalDepositedVnd: 0,
+    totalSpentVnd: 0,
+    currency: 'VND',
+  };
+
+  return {
+    user: {
+      id: userRow.id,
+      email: userRow.email,
+      phone: userRow.phone,
+      fullName: userRow.fullName,
+      status: userRow.status as 'ACTIVE' | 'LOCKED' | 'PENDING',
+      emailVerified: userRow.emailVerified,
+      lastLoginAt: userRow.lastLoginAt,
+      createdAt: userRow.createdAt,
+      walletBalanceVnd: wallet.availableBalanceVnd,
+      sellerDisplayName: sellerRows[0]?.displayName || null,
+      roles: roleRows.map((r) => r.code),
+    },
+    profile: profileRows[0] || null,
+    seller: sellerRows[0] || null,
+    activeSessionsCount: Number(activeSessionsCount || 0),
+    wallet: {
+      availableBalanceVnd: wallet.availableBalanceVnd,
+      pendingBalanceVnd: wallet.pendingBalanceVnd,
+      totalDepositedVnd: wallet.totalDepositedVnd,
+      totalSpentVnd: wallet.totalSpentVnd,
+      currency: wallet.currency,
+    },
+    recentWalletTransactions: txRows,
+    recentOrders: orderRows,
+    entitlements: entitlementRows,
+    customPrices: customPriceRows,
+    supportTickets: ticketRows,
+  };
+}
+
+export async function updateAdminUserProfileAndSecurity(params: {
+  actorUserId: number;
+  actorRoles: string[];
+  targetUserId: number;
+  fullName?: string;
+  phone?: string | null;
+  emailVerified?: boolean;
+  companyName?: string | null;
+  jobTitle?: string | null;
+  address?: string | null;
+  city?: string | null;
+  newPassword?: string;
+  revokeSessions?: boolean;
+  reason?: string | null;
+  ipAddress?: string | null;
+}) {
+  const actorIsSuperAdmin = params.actorRoles.includes('SUPER_ADMIN');
+
+  return db.transaction(async (tx) => {
+    const [targetUser] = await tx
+      .select()
+      .from(users)
+      .where(and(eq(users.id, params.targetUserId), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!targetUser) {
+      throw new AdminServiceError('USER_NOT_FOUND', 'Không tìm thấy tài khoản thành viên.', 404);
+    }
+
+    const targetRoles = await tx
+      .select({ roleCode: roles.code })
+      .from(userRoles)
+      .innerJoin(roles, eq(userRoles.roleId, roles.id))
+      .where(eq(userRoles.userId, targetUser.id));
+
+    if (
+      targetRoles.some((r) => r.roleCode === 'SUPER_ADMIN') &&
+      !actorIsSuperAdmin &&
+      targetUser.id !== params.actorUserId
+    ) {
+      throw new AdminServiceError(
+        'FORBIDDEN_SUPER_ADMIN',
+        'Chỉ SUPER_ADMIN mới có quyền hỗ trợ chỉnh sửa tài khoản SUPER_ADMIN khác.',
+        403
+      );
+    }
+
+    if (params.phone) {
+      const [phoneConflict] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.phone, params.phone), ne(users.id, targetUser.id)))
+        .limit(1);
+      if (phoneConflict) {
+        throw new AdminServiceError(
+          'PHONE_EXISTS',
+          'Số điện thoại này đang thuộc về một tài khoản khác.',
+          409
+        );
+      }
+    }
+
+    const userUpdates: Record<string, any> = { updatedAt: new Date() };
+    if (params.fullName !== undefined) userUpdates.fullName = params.fullName;
+    if (params.phone !== undefined) userUpdates.phone = params.phone;
+    if (params.emailVerified !== undefined) userUpdates.emailVerified = params.emailVerified;
+    if (params.newPassword) {
+      userUpdates.passwordHash = await bcrypt.hash(params.newPassword, 12);
+    }
+
+    await tx.update(users).set(userUpdates).where(eq(users.id, targetUser.id));
+
+    await tx
+      .insert(userProfiles)
+      .values({
+        userId: targetUser.id,
+        companyName: params.companyName ?? null,
+        jobTitle: params.jobTitle ?? null,
+        address: params.address ?? null,
+        city: params.city ?? null,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: userProfiles.userId,
+        set: {
+          ...(params.companyName !== undefined ? { companyName: params.companyName } : {}),
+          ...(params.jobTitle !== undefined ? { jobTitle: params.jobTitle } : {}),
+          ...(params.address !== undefined ? { address: params.address } : {}),
+          ...(params.city !== undefined ? { city: params.city } : {}),
+          updatedAt: new Date(),
+        },
+      });
+
+    if (params.revokeSessions || params.newPassword) {
+      await tx
+        .update(userSessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(userSessions.userId, targetUser.id), isNull(userSessions.revokedAt)));
+    }
+
+    await tx.insert(adminLogs).values({
+      adminUserId: params.actorUserId,
+      action: params.newPassword ? 'ADMIN_USER_PASSWORD_RESET' : 'ADMIN_USER_PROFILE_ASSISTED',
+      targetType: 'USER',
+      targetId: String(targetUser.id),
+      detailsJson: {
+        email: targetUser.email,
+        passwordReset: Boolean(params.newPassword),
+        sessionsRevoked: Boolean(params.revokeSessions || params.newPassword),
+        emailVerified: params.emailVerified,
+        reason: params.reason || null,
+      },
+      ipAddress: params.ipAddress || null,
+    });
+
+    await tx.insert(notifications).values({
+      userId: targetUser.id,
+      type: 'SYSTEM',
+      title: params.newPassword
+        ? 'Quản trị viên đã hỗ trợ đặt lại mật khẩu'
+        : 'Thông tin tài khoản được hỗ trợ cập nhật',
+      body: params.newPassword
+        ? 'Mật khẩu tài khoản của bạn đã được quản trị viên hỗ trợ cấp lại. Vui lòng đăng nhập và đổi mật khẩu mới nếu cần.'
+        : 'Quản trị viên đã hỗ trợ cập nhật thông tin hồ sơ tài khoản của bạn.',
+      linkUrl: '/tai-khoan',
+    });
+
+    return { updatedUserId: targetUser.id };
+  });
+}
+
+export async function adjustUserWalletByAdmin(params: {
+  actorUserId: number;
+  targetUserId: number;
+  direction: 'CREDIT' | 'DEBIT';
+  amountVnd: number;
+  reason: string;
+  ipAddress?: string | null;
+}) {
+  const amount = Math.round(Number(params.amountVnd));
+  if (!Number.isInteger(amount) || amount <= 0) {
+    throw new AdminServiceError('INVALID_AMOUNT', 'Số tiền điều chỉnh phải lớn hơn 0 VND.', 400);
+  }
+
+  return db.transaction(async (tx) => {
+    const [targetUser] = await tx
+      .select({ id: users.id, email: users.email, fullName: users.fullName })
+      .from(users)
+      .where(and(eq(users.id, params.targetUserId), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!targetUser) {
+      throw new AdminServiceError('USER_NOT_FOUND', 'Không tìm thấy tài khoản thành viên.', 404);
+    }
+
+    const lockedResult = await tx.execute(
+      sql`SELECT id, available_balance_vnd, total_deposited_vnd, total_spent_vnd, version FROM wallets WHERE user_id = ${targetUser.id} FOR UPDATE`
+    );
+
+    let walletRow = lockedResult.rows[0] as any;
+    if (!walletRow) {
+      const [createdWallet] = await tx
+        .insert(wallets)
+        .values({
+          userId: targetUser.id,
+          availableBalanceVnd: 0,
+          pendingBalanceVnd: 0,
+          totalDepositedVnd: 0,
+          totalSpentVnd: 0,
+          currency: 'VND',
+        })
+        .returning();
+      walletRow = {
+        id: createdWallet.id,
+        available_balance_vnd: 0,
+        total_deposited_vnd: 0,
+        total_spent_vnd: 0,
+        version: 1,
+      };
+    }
+
+    const beforeBalance = Number(walletRow.available_balance_vnd);
+    const afterBalance =
+      params.direction === 'CREDIT' ? beforeBalance + amount : beforeBalance - amount;
+
+    if (afterBalance < 0) {
+      throw new AdminServiceError(
+        'INSUFFICIENT_WALLET_BALANCE',
+        `Số dư hiện tại (${beforeBalance.toLocaleString('vi-VN')} ₫) không đủ để khấu trừ ${amount.toLocaleString('vi-VN')} ₫.`,
+        400
+      );
+    }
+
+    await tx
+      .update(wallets)
+      .set({
+        availableBalanceVnd: afterBalance,
+        ...(params.direction === 'CREDIT'
+          ? { totalDepositedVnd: Number(walletRow.total_deposited_vnd) + amount }
+          : {}),
+        version: Number(walletRow.version) + 1,
+        updatedAt: new Date(),
+      })
+      .where(eq(wallets.id, Number(walletRow.id)));
+
+    const txCode = `TX-ADM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    await tx.insert(walletTransactions).values({
+      txCode,
+      walletId: Number(walletRow.id),
+      userId: targetUser.id,
+      txType: 'ADMIN_ADJUST',
+      direction: params.direction,
+      amountVnd: amount,
+      balanceBeforeVnd: beforeBalance,
+      balanceAfterVnd: afterBalance,
+      status: 'COMPLETED',
+      source: 'ADMIN_PANEL',
+      referenceCode: `ADM-${params.actorUserId}`,
+      description:
+        params.direction === 'CREDIT'
+          ? `Quản trị viên hỗ trợ cộng ví: ${params.reason}`
+          : `Quản trị viên điều chỉnh trừ ví: ${params.reason}`,
+    });
+
+    await tx.insert(adminLogs).values({
+      adminUserId: params.actorUserId,
+      action: 'ADMIN_WALLET_ADJUSTED',
+      targetType: 'WALLET',
+      targetId: String(targetUser.id),
+      detailsJson: {
+        email: targetUser.email,
+        direction: params.direction,
+        amountVnd: amount,
+        beforeBalance,
+        afterBalance,
+        reason: params.reason,
+        txCode,
+      },
+      ipAddress: params.ipAddress || null,
+    });
+
+    await tx.insert(auditLogs).values({
+      actorUserId: params.actorUserId,
+      entityType: 'WALLET',
+      entityId: String(walletRow.id),
+      action: 'ADMIN_ADJUST',
+      beforeJson: { availableBalanceVnd: beforeBalance },
+      afterJson: { availableBalanceVnd: afterBalance, reason: params.reason },
+      ipAddress: params.ipAddress || null,
+    });
+
+    await tx.insert(notifications).values({
+      userId: targetUser.id,
+      type: 'WALLET',
+      title:
+        params.direction === 'CREDIT'
+          ? `Ví được hỗ trợ cộng +${amount.toLocaleString('vi-VN')} ₫`
+          : `Ví được điều chỉnh -${amount.toLocaleString('vi-VN')} ₫`,
+      body: `Lý do: ${params.reason}. Số dư hiện tại: ${afterBalance.toLocaleString('vi-VN')} ₫.`,
+      linkUrl: '/tai-khoan?tab=wallet',
+    });
+
+    return {
+      txCode,
+      balanceBeforeVnd: beforeBalance,
+      balanceAfterVnd: afterBalance,
+    };
+  });
+}
+
+export async function grantUserDrawingEntitlementByAdmin(params: {
+  actorUserId: number;
+  targetUserId: number;
+  productId: number;
+  additionalDownloads?: number;
+  reason?: string | null;
+  ipAddress?: string | null;
+}) {
+  const extraDownloads = Math.min(100, Math.max(1, Math.round(Number(params.additionalDownloads) || 20)));
+
+  return db.transaction(async (tx) => {
+    const [targetUser] = await tx
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(and(eq(users.id, params.targetUserId), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!targetUser) {
+      throw new AdminServiceError('USER_NOT_FOUND', 'Không tìm thấy tài khoản thành viên.', 404);
+    }
+
+    const [product] = await tx
+      .select({
+        id: products.id,
+        code: products.code,
+        slug: products.slug,
+        title: products.title,
+      })
+      .from(products)
+      .where(and(eq(products.id, params.productId), isNull(products.deletedAt)))
+      .limit(1);
+
+    if (!product) {
+      throw new AdminServiceError('PRODUCT_NOT_FOUND', 'Không tìm thấy hồ sơ bản vẽ.', 404);
+    }
+
+    const [existing] = await tx
+      .select()
+      .from(downloadEntitlements)
+      .where(
+        and(
+          eq(downloadEntitlements.userId, targetUser.id),
+          eq(downloadEntitlements.productId, product.id)
+        )
+      )
+      .limit(1);
+
+    let resultEntitlement;
+    if (existing) {
+      const [updated] = await tx
+        .update(downloadEntitlements)
+        .set({
+          maxDownloads: existing.maxDownloads + extraDownloads,
+          isRevoked: false,
+        })
+        .where(eq(downloadEntitlements.id, existing.id))
+        .returning();
+      resultEntitlement = updated;
+    } else {
+      const [created] = await tx
+        .insert(downloadEntitlements)
+        .values({
+          userId: targetUser.id,
+          productId: product.id,
+          maxDownloads: extraDownloads,
+          downloadsUsed: 0,
+          isRevoked: false,
+        })
+        .returning();
+      resultEntitlement = created;
+    }
+
+    await tx.insert(adminLogs).values({
+      adminUserId: params.actorUserId,
+      action: 'ADMIN_ENTITLEMENT_GRANTED',
+      targetType: 'ENTITLEMENT',
+      targetId: `${targetUser.id}:${product.id}`,
+      detailsJson: {
+        email: targetUser.email,
+        productCode: product.code,
+        additionalDownloads: extraDownloads,
+        newMaxDownloads: resultEntitlement.maxDownloads,
+        reason: params.reason || null,
+      },
+      ipAddress: params.ipAddress || null,
+    });
+
+    await tx.insert(notifications).values({
+      userId: targetUser.id,
+      type: 'ORDER',
+      title: `Được hỗ trợ quyền tải hồ sơ ${product.code}`,
+      body: `Quản trị viên đã mở quyền tải xuống bản vẽ "${product.title}" (+${extraDownloads} lượt tải).${
+        params.reason ? ` Ghi chú: ${params.reason}` : ''
+      }`,
+      linkUrl: `/ban-ve/${product.slug}`,
+    });
+
+    return resultEntitlement;
+  });
+}
+
+export async function sendAdminDirectSupportToUser(params: {
+  actorUserId: number;
+  targetUserId: number;
+  title: string;
+  message: string;
+  createTicketLog?: boolean;
+  ipAddress?: string | null;
+}) {
+  return db.transaction(async (tx) => {
+    const [targetUser] = await tx
+      .select({ id: users.id, email: users.email, fullName: users.fullName })
+      .from(users)
+      .where(and(eq(users.id, params.targetUserId), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!targetUser) {
+      throw new AdminServiceError('USER_NOT_FOUND', 'Không tìm thấy tài khoản thành viên.', 404);
+    }
+
+    const [notif] = await tx
+      .insert(notifications)
+      .values({
+        userId: targetUser.id,
+        type: 'SUPPORT',
+        title: params.title.trim(),
+        body: params.message.trim(),
+        linkUrl: '/tai-khoan?tab=notifications',
+      })
+      .returning();
+
+    let ticketCode: string | null = null;
+    if (params.createTicketLog) {
+      ticketCode = `SUP-ADM-${Date.now().toString().slice(-6)}`;
+      await tx.insert(supportTickets).values({
+        ticketCode,
+        userId: targetUser.id,
+        contactName: targetUser.fullName,
+        contactEmail: targetUser.email,
+        subject: params.title.trim(),
+        category: 'ACCOUNT',
+        message: `[Hỗ trợ trực tiếp từ Quản trị viên] ${params.message.trim()}`,
+        status: 'RESOLVED',
+        assignedTo: params.actorUserId,
+      });
+    }
+
+    await tx.insert(adminLogs).values({
+      adminUserId: params.actorUserId,
+      action: 'ADMIN_DIRECT_SUPPORT_SENT',
+      targetType: 'USER',
+      targetId: String(targetUser.id),
+      detailsJson: {
+        email: targetUser.email,
+        title: params.title.trim(),
+        ticketCode,
+      },
+      ipAddress: params.ipAddress || null,
+    });
+
+    return { notificationId: notif.id, ticketCode };
+  });
 }
 
 export async function updateAdminUserRolesAndStatus(params: {

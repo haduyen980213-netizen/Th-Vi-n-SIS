@@ -118,11 +118,11 @@ function SisRouterShell() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-[#142C48]">
+    <div className="min-h-screen flex flex-col bg-[#F4F7FC] text-[#142C48]">
       <Header currentRoute={route} onNavigate={navigate} onOpenAuth={openAuth} />
 
       <main className="flex-1">
-        {route.name === 'home' && <HomePage onNavigate={navigate} />}
+        {route.name === 'home' && <HomePage onNavigate={navigate} onOpenAuth={openAuth} />}
         {route.name === 'catalog' && (
           <CatalogPage
             initialCategory={route.category}

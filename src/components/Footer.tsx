@@ -7,11 +7,11 @@ interface FooterProps {
 
 export function Footer({ onNavigate }: FooterProps) {
   return (
-    <footer className="bg-[#142C48] text-white border-t border-[#1E3B5F]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
+    <footer className="bg-[#0F274D] text-white border-t border-[#1B3E78]">
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-10">
           <div className="md:col-span-2 space-y-4">
-            <div className="inline-flex items-center gap-2.5 bg-white px-3 py-1.5 rounded-lg">
+            <div className="inline-flex items-center gap-2.5 bg-white px-3.5 py-2 rounded-xl shadow-xs">
               <SisLogo />
             </div>
             <p className="text-sm text-slate-300 leading-relaxed max-w-md">
@@ -24,7 +24,7 @@ export function Footer({ onNavigate }: FooterProps) {
           </div>
 
           <div>
-            <h3 className="text-sm font-bold text-[#F2C94C] mb-4">Thư viện bản vẽ</h3>
+            <h3 className="text-sm font-bold text-[#F6C343] mb-4">Thư viện bản vẽ</h3>
             <ul className="space-y-2.5 text-sm text-slate-300">
               <li>
                 <button
@@ -66,7 +66,7 @@ export function Footer({ onNavigate }: FooterProps) {
           </div>
 
           <div>
-            <h3 className="text-sm font-bold text-[#F2C94C] mb-4">Tài khoản &amp; Hệ thống</h3>
+            <h3 className="text-sm font-bold text-[#F6C343] mb-4">Tài khoản &amp; Hệ thống</h3>
             <ul className="space-y-2.5 text-sm text-slate-300">
               <li>
                 <button

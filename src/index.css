@@ -2,18 +2,20 @@
 
 @layer base {
   :root {
+    --sis-primary: #1B56B8;
+    --sis-primary-hover: #154698;
     --sis-navy: #142C48;
     --sis-navy-dark: #0E2036;
-    --sis-gold: #F2C94C;
-    --sis-gold-hover: #E5B935;
-    --sis-surface: #F5F7FA;
+    --sis-gold: #F6C343;
+    --sis-gold-hover: #EBB52D;
+    --sis-surface: #F4F7FC;
     --sis-border: #E2E8F0;
   }
 
   html {
     font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
     color: #142C48;
-    background-color: #FFFFFF;
+    background-color: #F4F7FC;
   }
 
   h1, h2, h3, h4, .font-display {

@@ -389,6 +389,60 @@ export interface AdminUserRecord {
   roles: string[];
 }
 
+export interface AdminUsersListResponse {
+  items: AdminUserRecord[];
+  summary: {
+    total: number;
+    active: number;
+    locked: number;
+    sellers: number;
+  };
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface AdminUserDetailRecord {
+  user: AdminUserRecord;
+  profile: UserProfile | null;
+  seller: SellerProfileRecord | null;
+  activeSessionsCount: number;
+  wallet: WalletSummary;
+  recentWalletTransactions: WalletTransactionRecord[];
+  recentOrders: Array<{
+    id: number;
+    orderCode: string;
+    totalAmountVnd: number;
+    status: string;
+    paidAt: string | null;
+    createdAt: string;
+  }>;
+  entitlements: Array<{
+    id: number;
+    productId: number;
+    productCode: string;
+    productSlug: string;
+    productTitle: string;
+    downloadsUsed: number;
+    maxDownloads: number;
+    isRevoked: boolean;
+    grantedAt: string;
+  }>;
+  customPrices: Array<{
+    id: number;
+    productId: number;
+    productCode: string;
+    productTitle: string;
+    listedPriceVnd: number;
+    customPriceVnd: number;
+    isActive: boolean;
+  }>;
+  supportTickets: SupportTicketRecord[];
+}
+
 export interface RbacRoleRecord {
   id: number;
   code: string;
