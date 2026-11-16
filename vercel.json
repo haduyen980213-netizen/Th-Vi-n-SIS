@@ -6,7 +6,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 30,
-      "includeFiles": "firebase-applet-config.json"
+      "includeFiles": "{firebase-applet-config.json,src/assets/images/**}"
     }
   },
   "rewrites": [
@@ -14,6 +14,7 @@
     { "source": "/robots.txt", "destination": "/api/index.ts" },
     { "source": "/sitemap.xml", "destination": "/api/index.ts" },
     { "source": "/uploads/previews/(.*)", "destination": "/api/index.ts" },
-    { "source": "/((?!assets/|src/assets/|favicon\\.ico).*)", "destination": "/index.html" }
+    { "source": "/src/assets/images/(.*)", "destination": "/api/index.ts" },
+    { "source": "/((?!assets/|favicon\\.ico).*)", "destination": "/index.html" }
   ]
 }
