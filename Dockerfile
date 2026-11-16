@@ -27,13 +27,14 @@ RUN apk add --no-cache wget tzdata \
 
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund \
-  && npm install --no-save --no-audit --no-fund tsx@^4.21.0 \
   && npm cache clean --force
 
 # Copy mã nguồn backend và tài nguyên đã biên dịch
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/server.ts ./server.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/firebase-applet-config.json ./firebase-applet-config.json
 COPY --from=builder /app/src ./src
 
 # Tạo thư mục lưu trữ private vault & preview images, cấp quyền non-root (node)

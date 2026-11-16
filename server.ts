@@ -70,6 +70,15 @@ async function startServer() {
 
   // REST API v1
   app.use('/api/v1', v1Router);
+  app.use('/api', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'API_ROUTE_NOT_FOUND',
+        message: `Không tìm thấy API endpoint (${req.method} ${req.originalUrl}).`,
+      },
+    });
+  });
 
   // SEO endpoints: robots.txt & dynamic PostgreSQL sitemap.xml
   app.get('/robots.txt', (req, res) => {

@@ -25,18 +25,40 @@ export function HomePage({ onNavigate }: HomePageProps) {
     setLoading(true);
     setError('');
     try {
-      const [cats, featRes, freeRes, cmsRes] = await Promise.all([
+      const [catsRes, featRes, freeRes, cmsRes] = await Promise.allSettled([
         apiRequest<CategoryItem[]>('/categories'),
         apiRequest<{ items: ProductSummary[] }>('/products?tag=featured&limit=6&sort=popular'),
         apiRequest<{ items: ProductSummary[] }>('/products?tag=free&limit=3&sort=newest'),
-        apiRequest<{ banners: CmsBannerRecord[]; settings: Record<string, string> }>('/cms/home').catch(
-          () => ({ banners: [], settings: {} })
-        ),
+        apiRequest<{ banners: CmsBannerRecord[]; settings: Record<string, string> }>('/cms/home'),
       ]);
-      setCategories(cats);
-      setFeaturedProducts(featRes.items);
-      setFreeProducts(freeRes.items);
-      setCmsBanners(cmsRes.banners || []);
+
+      const errors: string[] = [];
+
+      if (catsRes.status === 'fulfilled') {
+        setCategories(catsRes.value);
+      } else {
+        errors.push(catsRes.reason?.message || 'Không thể tải danh mục bản vẽ.');
+      }
+
+      if (featRes.status === 'fulfilled') {
+        setFeaturedProducts(featRes.value.items);
+      } else {
+        errors.push(featRes.reason?.message || 'Không thể tải hồ sơ bản vẽ nổi bật.');
+      }
+
+      if (freeRes.status === 'fulfilled') {
+        setFreeProducts(freeRes.value.items);
+      }
+
+      if (cmsRes.status === 'fulfilled') {
+        setCmsBanners(cmsRes.value.banners || []);
+      } else {
+        setCmsBanners([]);
+      }
+
+      if (errors.length > 0) {
+        setError(errors[0]);
+      }
     } catch (err: any) {
       setError(err?.message || 'Không thể tải dữ liệu thư viện.');
     } finally {
@@ -177,7 +199,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               />
             ))}
           </div>
-        ) : (
+        ) : categories.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             {categories.map((cat) => (
               <button
@@ -194,6 +216,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 </div>
               </button>
             ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-[#F5F7FA] p-6 text-center text-sm text-slate-600">
+            Không thể tải danh sách chuyên mục. Vui lòng thử lại.
           </div>
         )}
       </section>
@@ -219,15 +245,6 @@ export function HomePage({ onNavigate }: HomePageProps) {
           </Button>
         </div>
 
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 flex items-center justify-between gap-4">
-            <span className="text-sm text-red-700">{error}</span>
-            <Button variant="outline" size="sm" onClick={loadData}>
-              Thử lại
-            </Button>
-          </div>
-        )}
-
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {Array.from({ length: 6 }).map((_, idx) => (
@@ -236,6 +253,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 className="h-96 rounded-xl bg-[#F5F7FA] border border-slate-200 animate-pulse"
               />
             ))}
+          </div>
+        ) : error && featuredProducts.length === 0 ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 flex items-center justify-between gap-4">
+            <span className="text-sm text-red-700">{error}</span>
+            <Button variant="outline" size="sm" onClick={loadData}>
+              Thử lại
+            </Button>
           </div>
         ) : featuredProducts.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-[#F5F7FA] p-10 text-center">
