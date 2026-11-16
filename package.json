@@ -3,9 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "build:vercel": "esbuild api/_entry.ts --bundle --platform=node --format=esm --packages=external --outfile=api/_bundle.mjs",
     "start": "node server.ts",
     "preview": "node server.ts",
     "clean": "rm -rf dist server.js",

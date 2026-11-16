@@ -1,20 +1,20 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run build:vercel && npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
   "functions": {
-    "api/index.ts": {
+    "api/index.mjs": {
       "maxDuration": 30,
-      "includeFiles": "{firebase-applet-config.json,src/assets/images/**}"
+      "includeFiles": "{api/_bundle.mjs,firebase-applet-config.json,src/assets/images/**}"
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.ts" },
-    { "source": "/robots.txt", "destination": "/api/index.ts" },
-    { "source": "/sitemap.xml", "destination": "/api/index.ts" },
-    { "source": "/uploads/previews/(.*)", "destination": "/api/index.ts" },
-    { "source": "/src/assets/images/(.*)", "destination": "/api/index.ts" },
+    { "source": "/api/(.*)", "destination": "/api/index.mjs" },
+    { "source": "/robots.txt", "destination": "/api/index.mjs" },
+    { "source": "/sitemap.xml", "destination": "/api/index.mjs" },
+    { "source": "/uploads/previews/(.*)", "destination": "/api/index.mjs" },
+    { "source": "/src/assets/images/(.*)", "destination": "/api/index.mjs" },
     { "source": "/((?!assets/|favicon\\.ico).*)", "destination": "/index.html" }
   ]
 }

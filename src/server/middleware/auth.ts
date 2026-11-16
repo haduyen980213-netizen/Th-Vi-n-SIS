@@ -12,7 +12,7 @@ import {
   users,
   wallets,
 } from '../../db/schema.ts';
-import { adminAuth } from '../../lib/firebase-admin.ts';
+import { verifyFirebaseIdToken } from '../../lib/firebase-admin.ts';
 
 export const SESSION_COOKIE_NAME = 'sis_session';
 
@@ -285,7 +285,7 @@ async function resolveAuthFromRequest(req: AuthRequest): Promise<void> {
           return;
         }
       } else {
-        const decoded = await adminAuth.verifyIdToken(token);
+        const decoded = await verifyFirebaseIdToken(token);
         if (decoded && decoded.uid && decoded.email) {
           const user = await syncFirebaseUser({
             uid: decoded.uid,
