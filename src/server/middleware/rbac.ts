@@ -1,5 +1,5 @@
-import { NextFunction, Response } from 'express';
-import { AuthRequest } from './auth.ts';
+import type { NextFunction, Response } from 'express';
+import type { AuthRequest } from './auth.ts';
 
 export function requireRoles(...allowedRoles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {

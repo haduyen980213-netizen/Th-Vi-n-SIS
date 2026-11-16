@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { and, eq, gt, isNull } from 'drizzle-orm';
-import { NextFunction, Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { db } from '../../db/index.ts';
 import {
   permissions,

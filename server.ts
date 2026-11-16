@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import cookieParser from 'cookie-parser';
-import express, { NextFunction, Request, Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import multer from 'multer';
 import fs from 'node:fs';
@@ -25,7 +25,11 @@ function escapeXml(value: string): string {
 async function startServer() {
   const app = express();
   const port = Number(process.env.PORT) || 3000;
-  const isProd = process.env.NODE_ENV === 'production';
+  const isTsxDev = process.execArgv.some((arg) => arg.includes('tsx'));
+  const isProd =
+    process.env.NODE_ENV === 'production' ||
+    process.env.npm_lifecycle_event === 'start' ||
+    (!isTsxDev && fs.existsSync(path.resolve(__dirname, 'dist', 'index.html')));
 
   app.disable('x-powered-by');
   app.set('trust proxy', 1);

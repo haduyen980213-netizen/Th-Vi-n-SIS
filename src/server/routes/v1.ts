@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import bcrypt from 'bcryptjs';
 import { and, asc, count, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
-import { Router, Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '../../db/index.ts';
 import {
@@ -37,7 +37,7 @@ import {
 } from '../../db/schema.ts';
 import { ensureDatabaseSeeded } from '../../db/seed.ts';
 import {
-  AuthRequest,
+  type AuthRequest,
   ensureInitialSuperAdmin,
   generateOpaqueToken,
   hashToken,
