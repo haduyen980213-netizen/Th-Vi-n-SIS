@@ -9,25 +9,17 @@ declare global {
 export const createPool = () => {
   if (!global._postgresPool) {
     const maxConnections = Math.max(5, Math.min(50, Number(process.env.DB_POOL_MAX) || 15));
-    const poolConfig = process.env.DATABASE_URL
-      ? {
-          connectionString: process.env.DATABASE_URL,
-          max: maxConnections,
-          idleTimeoutMillis: 30000,
-          connectionTimeoutMillis: 15000,
-        }
-      : {
-          host: process.env.SQL_HOST,
-          port: Number(process.env.SQL_PORT) || 5432,
-          user: process.env.SQL_USER,
-          password: process.env.SQL_PASSWORD,
-          database: process.env.SQL_DB_NAME,
-          max: maxConnections,
-          idleTimeoutMillis: 30000,
-          connectionTimeoutMillis: 15000,
-        };
 
-    global._postgresPool = new Pool(poolConfig);
+    global._postgresPool = new Pool({
+      host: process.env.SQL_HOST,
+      port: Number(process.env.SQL_PORT) || 5432,
+      user: process.env.SQL_USER,
+      password: process.env.SQL_PASSWORD,
+      database: process.env.SQL_DB_NAME,
+      max: maxConnections,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 15000,
+    });
 
     global._postgresPool.on('error', (err) => {
       console.error('Unexpected error on idle SQL pool client:', err);

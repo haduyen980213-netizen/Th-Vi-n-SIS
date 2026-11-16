@@ -19,7 +19,7 @@ export function Footer({ onNavigate }: FooterProps) {
               chuyên nghiệp dành cho kiến trúc sư, kỹ sư và đơn vị thi công tại Việt Nam.
             </p>
             <p className="text-xs text-slate-400">
-              Hỗ trợ kỹ thuật: hotro@thuviensis.vn · Tổng đài: 1900 6868
+              Hỗ trợ kỹ thuật: hotro.thuviensis.vn@gmail.com · Tổng đài: 0889559997
             </p>
           </div>
 

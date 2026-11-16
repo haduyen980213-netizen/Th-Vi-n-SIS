@@ -127,8 +127,8 @@ async function runSeed(): Promise<void> {
   // 4. Seed Default Site Settings & Payment Provider Metadata
   const settingSeeds = [
     { key: 'site_name', value: 'THƯ VIỆN SIS', groupName: 'BRAND', description: 'Tên thương hiệu hiển thị' },
-    { key: 'support_email', value: 'hotro@thuviensis.vn', groupName: 'CONTACT', description: 'Email hỗ trợ kỹ thuật' },
-    { key: 'support_hotline', value: '1900 6868', groupName: 'CONTACT', description: 'Tổng đài hỗ trợ' },
+    { key: 'support_email', value: 'hotro.thuviensis.vn@gmail.com', groupName: 'CONTACT', description: 'Email hỗ trợ kỹ thuật' },
+    { key: 'support_hotline', value: '0889559997', groupName: 'CONTACT', description: 'Tổng đài hỗ trợ' },
     { key: 'default_commission_bps', value: '7000', groupName: 'FINANCE', description: 'Tỷ lệ hoa hồng mặc định cho người bán (70%)' },
   ];
   await db.insert(siteSettings).values(settingSeeds).onConflictDoNothing({ target: siteSettings.key });

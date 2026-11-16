@@ -64,11 +64,11 @@ export function SupportPage() {
           <div className="rounded-xl border border-slate-200 bg-[#F5F7FA] p-5 space-y-4 text-sm">
             <div>
               <div className="text-xs font-semibold text-slate-500">Email hỗ trợ chính thức</div>
-              <div className="font-semibold text-[#142C48] mt-0.5">hotro@thuviensis.vn</div>
+              <div className="font-semibold text-[#142C48] mt-0.5">hotro.thuviensis.vn@gmail.com</div>
             </div>
             <div>
               <div className="text-xs font-semibold text-slate-500">Tổng đài kỹ thuật</div>
-              <div className="font-mono-tech font-semibold text-[#142C48] mt-0.5">1900 6868</div>
+              <div className="font-mono-tech font-semibold text-[#142C48] mt-0.5">0889559997</div>
             </div>
             <div>
               <div className="text-xs font-semibold text-slate-500">Giờ làm việc</div>

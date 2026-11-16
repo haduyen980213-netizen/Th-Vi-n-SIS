@@ -73,7 +73,7 @@ export async function apiRequest<T>(
     const errMsg =
       payload?.error?.message ||
       (res.status === 404
-        ? 'Không tìm thấy máy chủ dữ liệu (/api/v1 trả về 404). Đường dẫn hiện tại có thể chỉ đang chạy bản tĩnh (dist) mà chưa khởi chạy máy chủ backend.'
+        ? 'Không tìm thấy máy chủ API (/api/v1 trả về 404). Đường dẫn hiện tại đang chạy bản giao diện tĩnh không kèm backend — vui lòng truy cập bản chạy đầy đủ (Dev App / Cloud Run) để kết nối dữ liệu.'
         : `Yêu cầu thất bại (${res.status})`);
     const errCode = payload?.error?.code || 'HTTP_ERROR';
     throw new ApiError(errMsg, errCode, res.status);

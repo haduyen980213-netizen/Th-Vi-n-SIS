@@ -29,6 +29,7 @@ async function startServer() {
   const isProd =
     process.env.NODE_ENV === 'production' ||
     process.env.npm_lifecycle_event === 'start' ||
+    process.env.npm_lifecycle_event === 'preview' ||
     (!isTsxDev && fs.existsSync(path.resolve(__dirname, 'dist', 'index.html')));
 
   app.disable('x-powered-by');
