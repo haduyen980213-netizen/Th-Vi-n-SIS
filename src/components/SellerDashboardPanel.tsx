@@ -114,8 +114,13 @@ export function SellerDashboardPanel({ onNavigate }: SellerDashboardPanelProps) 
   const [editPriceVnd, setEditPriceVnd] = useState<number>(0);
   const [editIsFree, setEditIsFree] = useState(false);
   const [editSummary, setEditSummary] = useState('');
-  const [editStatus, setEditStatus] = useState<'DRAFT' | 'PENDING' | 'HIDDEN'>('PENDING');
+  const [editStatus, setEditStatus] = useState<'APPROVED' | 'DRAFT' | 'PENDING' | 'HIDDEN'>('PENDING');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  const canDirectApprove = Boolean(
+    user?.roles?.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'MODERATOR') ||
+      user?.permissions?.includes('product:approve')
+  );
 
   // Inline Version Upload state
   const [versionProductId, setVersionProductId] = useState<number | null>(null);
@@ -286,6 +291,8 @@ export function SellerDashboardPanel({ onNavigate }: SellerDashboardPanelProps) 
     setEditSummary(p.summary);
     setEditStatus(
       p.approvalStatus === 'APPROVED'
+        ? 'APPROVED'
+        : p.approvalStatus === 'HIDDEN'
         ? 'HIDDEN'
         : p.approvalStatus === 'DRAFT'
         ? 'DRAFT'
@@ -305,7 +312,7 @@ export function SellerDashboardPanel({ onNavigate }: SellerDashboardPanelProps) 
         isFree: editIsFree,
         listedPriceVnd: editIsFree ? 0 : editPriceVnd,
       };
-      if (product.approvalStatus !== 'APPROVED' || editStatus === 'HIDDEN') {
+      if (editStatus !== product.approvalStatus) {
         payload.approvalStatus = editStatus;
       }
 
@@ -768,7 +775,13 @@ export function SellerDashboardPanel({ onNavigate }: SellerDashboardPanelProps) 
                                 <input
                                   type="checkbox"
                                   checked={editIsFree}
-                                  onChange={(e) => setEditIsFree(e.target.checked)}
+                                  onChange={(e) => {
+                                    const free = e.target.checked;
+                                    setEditIsFree(free);
+                                    if (!free && editPriceVnd < 10000) {
+                                      setEditPriceVnd(100000);
+                                    }
+                                  }}
                                 />
                                 Miễn phí
                               </label>
@@ -784,9 +797,16 @@ export function SellerDashboardPanel({ onNavigate }: SellerDashboardPanelProps) 
                               onChange={(e) => setEditStatus(e.target.value as any)}
                               className="w-full h-9 px-3 rounded-lg border border-slate-300 bg-white text-xs"
                             >
+                              {(p.approvalStatus === 'APPROVED' || canDirectApprove) && (
+                                <option value="APPROVED">
+                                  Đang hiển thị công khai (Giữ nguyên / Phát hành)
+                                </option>
+                              )}
                               <option value="PENDING">Gửi kiểm duyệt phát hành</option>
-                              <option value="DRAFT">Lưu bản nháp (chưa gửi duyệt)</option>
-                              {p.approvalStatus === 'APPROVED' && (
+                              {p.approvalStatus !== 'APPROVED' && (
+                                <option value="DRAFT">Lưu bản nháp (chưa gửi duyệt)</option>
+                              )}
+                              {(p.approvalStatus === 'APPROVED' || p.approvalStatus === 'HIDDEN') && (
                                 <option value="HIDDEN">Tạm ẩn khỏi gian hàng</option>
                               )}
                             </select>

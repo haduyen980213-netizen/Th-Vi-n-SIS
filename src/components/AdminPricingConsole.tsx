@@ -108,7 +108,9 @@ export function AdminPricingConsole() {
   const [savingBank, setSavingBank] = useState(false);
 
   // Moderation state
-  const [moderationFilter, setModerationFilter] = useState<'PENDING' | 'ALL' | 'REJECTED' | 'APPROVED'>('PENDING');
+  const [moderationFilter, setModerationFilter] = useState<
+    'PENDING' | 'HIDDEN' | 'REJECTED' | 'APPROVED' | 'ALL'
+  >('PENDING');
   const [moderationItems, setModerationItems] = useState<AdminModerationProductRecord[]>([]);
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -1066,6 +1068,7 @@ export function AdminPricingConsole() {
               {(
                 [
                   { id: 'PENDING', label: 'Chờ duyệt' },
+                  { id: 'HIDDEN', label: 'Đang tạm ẩn' },
                   { id: 'REJECTED', label: 'Từ chối' },
                   { id: 'APPROVED', label: 'Đã duyệt' },
                   { id: 'ALL', label: 'Tất cả' },
@@ -1163,7 +1166,17 @@ export function AdminPricingConsole() {
                         {item.isFree ? 'Miễn phí' : formatVnd(item.listedPriceVnd)}
                       </td>
                       <td className="py-2.5 px-3">
-                        <div className="font-semibold">{item.approvalStatus}</div>
+                        <div className="font-semibold">
+                          {item.approvalStatus === 'APPROVED'
+                            ? 'Đang phát hành'
+                            : item.approvalStatus === 'HIDDEN'
+                            ? 'Đang tạm ẩn'
+                            : item.approvalStatus === 'PENDING'
+                            ? 'Chờ duyệt'
+                            : item.approvalStatus === 'REJECTED'
+                            ? 'Từ chối'
+                            : 'Bản nháp'}
+                        </div>
                         {item.rejectionReason && (
                           <div className="text-[11px] text-red-600 line-clamp-1 max-w-[180px]">
                             {item.rejectionReason}

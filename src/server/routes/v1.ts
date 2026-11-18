@@ -2519,7 +2519,7 @@ router.patch(
         fileFormat: z.string().trim().min(2).max(40).optional(),
         softwareVersion: z.string().trim().max(80).nullable().optional(),
         pageOrSheetCount: z.number().int().min(1).max(5000).optional(),
-        approvalStatus: z.enum(['DRAFT', 'PENDING', 'HIDDEN']).optional(),
+        approvalStatus: z.enum(['APPROVED', 'DRAFT', 'PENDING', 'HIDDEN']).optional(),
       });
 
       const parsed = schema.safeParse(req.body);
@@ -2533,11 +2533,19 @@ router.patch(
         });
       }
 
+      const allowDirectApprove = Boolean(
+        req.authUser!.permissions.includes('product:approve') ||
+          req.authUser!.roles.includes('ADMIN') ||
+          req.authUser!.roles.includes('SUPER_ADMIN') ||
+          req.authUser!.roles.includes('MODERATOR')
+      );
+
       const updated = await updateSellerProduct({
         userId: req.authUser!.id,
         sellerId: info.seller.id,
         productId,
         ...parsed.data,
+        allowDirectApprove,
         ipAddress: req.ip || null,
       });
       return res.json({ success: true, data: updated });

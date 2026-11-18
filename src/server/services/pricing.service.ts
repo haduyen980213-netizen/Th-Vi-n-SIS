@@ -60,6 +60,23 @@ export async function resolveEffectivePricesMap(
   }
 
   for (const item of productItems) {
+    const custom = customPriceMap.get(item.id);
+    if (custom) {
+      const discountPercent =
+        item.listedPriceVnd > custom.customPriceVnd && item.listedPriceVnd > 0
+          ? Math.round(((item.listedPriceVnd - custom.customPriceVnd) / item.listedPriceVnd) * 100)
+          : 0;
+      result.set(item.id, {
+        listedPriceVnd: item.listedPriceVnd,
+        effectivePriceVnd: custom.customPriceVnd,
+        priceSource: 'ACCOUNT_CUSTOM',
+        hasCustomPrice: true,
+        discountPercent,
+        customEndsAt: custom.endsAt,
+      });
+      continue;
+    }
+
     if (item.isFree || item.listedPriceVnd <= 0) {
       result.set(item.id, {
         listedPriceVnd: 0,
@@ -72,30 +89,14 @@ export async function resolveEffectivePricesMap(
       continue;
     }
 
-    const custom = customPriceMap.get(item.id);
-    if (custom) {
-      const discountPercent =
-        item.listedPriceVnd > custom.customPriceVnd
-          ? Math.round(((item.listedPriceVnd - custom.customPriceVnd) / item.listedPriceVnd) * 100)
-          : 0;
-      result.set(item.id, {
-        listedPriceVnd: item.listedPriceVnd,
-        effectivePriceVnd: custom.customPriceVnd,
-        priceSource: 'ACCOUNT_CUSTOM',
-        hasCustomPrice: true,
-        discountPercent,
-        customEndsAt: custom.endsAt,
-      });
-    } else {
-      result.set(item.id, {
-        listedPriceVnd: item.listedPriceVnd,
-        effectivePriceVnd: item.listedPriceVnd,
-        priceSource: 'LISTED',
-        hasCustomPrice: false,
-        discountPercent: 0,
-        customEndsAt: null,
-      });
-    }
+    result.set(item.id, {
+      listedPriceVnd: item.listedPriceVnd,
+      effectivePriceVnd: item.listedPriceVnd,
+      priceSource: 'LISTED',
+      hasCustomPrice: false,
+      discountPercent: 0,
+      customEndsAt: null,
+    });
   }
 
   return result;
@@ -439,15 +440,23 @@ export async function bulkApplyAccountPricing(params: {
       }
     }
 
-    const paidProducts = targetProducts.filter((p) => !p.isFree && p.listedPriceVnd > 0);
-    if (paidProducts.length === 0) {
-      throw new Error('Không có sản phẩm trả phí nào phù hợp để áp dụng giá hàng loạt.');
+    const applicableProducts =
+      params.mode === 'PERCENT_DISCOUNT'
+        ? targetProducts.filter((p) => !p.isFree && p.listedPriceVnd > 0)
+        : targetProducts;
+
+    if (applicableProducts.length === 0) {
+      throw new Error(
+        params.mode === 'PERCENT_DISCOUNT'
+          ? 'Không có sản phẩm trả phí nào phù hợp để áp dụng giảm giá theo %.'
+          : 'Không có bản vẽ nào được chọn để áp dụng giá cố định.'
+      );
     }
 
     let updatedCount = 0;
 
     for (const userId of params.userIds) {
-      for (const product of paidProducts) {
+      for (const product of applicableProducts) {
         const newPrice =
           params.mode === 'FIXED_VND'
             ? Math.round(params.value)
@@ -513,10 +522,10 @@ export async function bulkApplyAccountPricing(params: {
       adminUserId: params.adminUserId,
       action: 'BULK_UPDATE_USER_PRICING',
       targetType: 'USER_PRODUCT_PRICE',
-      targetId: `${params.userIds.length}_USERS_${paidProducts.length}_PRODUCTS`,
+      targetId: `${params.userIds.length}_USERS_${applicableProducts.length}_PRODUCTS`,
       detailsJson: {
         userIds: params.userIds,
-        productCount: paidProducts.length,
+        productCount: applicableProducts.length,
         mode: params.mode,
         value: params.value,
         updatedCount,
@@ -524,7 +533,11 @@ export async function bulkApplyAccountPricing(params: {
       ipAddress: params.ipAddress || null,
     });
 
-    return { updatedCount, userCount: params.userIds.length, productCount: paidProducts.length };
+    return {
+      updatedCount,
+      userCount: params.userIds.length,
+      productCount: applicableProducts.length,
+    };
   });
 }
 

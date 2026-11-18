@@ -468,7 +468,8 @@ export async function updateSellerProduct(params: {
   fileFormat?: string;
   softwareVersion?: string | null;
   pageOrSheetCount?: number;
-  approvalStatus?: 'DRAFT' | 'PENDING' | 'HIDDEN';
+  approvalStatus?: 'APPROVED' | 'DRAFT' | 'PENDING' | 'HIDDEN';
+  allowDirectApprove?: boolean;
   ipAddress?: string | null;
 }) {
   return db.transaction(async (tx) => {
@@ -488,8 +489,13 @@ export async function updateSellerProduct(params: {
       throw new SellerError('PRODUCT_NOT_FOUND', 'Không tìm thấy bản vẽ thuộc quyền quản lý của bạn.', 404);
     }
 
-    const nextIsFree =
-      params.isFree !== undefined ? params.isFree : existing.isFree;
+    let nextIsFree = existing.isFree;
+    if (params.isFree !== undefined) {
+      nextIsFree = params.isFree;
+    } else if (params.listedPriceVnd !== undefined) {
+      nextIsFree = params.listedPriceVnd <= 0;
+    }
+
     const nextPrice = nextIsFree
       ? 0
       : params.listedPriceVnd !== undefined
@@ -502,7 +508,15 @@ export async function updateSellerProduct(params: {
 
     let nextStatus = existing.approvalStatus;
     if (params.approvalStatus) {
-      if (params.approvalStatus === 'HIDDEN' && existing.approvalStatus === 'APPROVED') {
+      if (
+        params.approvalStatus === 'APPROVED' &&
+        (existing.approvalStatus === 'APPROVED' || params.allowDirectApprove)
+      ) {
+        nextStatus = 'APPROVED';
+      } else if (
+        params.approvalStatus === 'HIDDEN' &&
+        (existing.approvalStatus === 'APPROVED' || existing.approvalStatus === 'HIDDEN')
+      ) {
         nextStatus = 'HIDDEN';
       } else if (params.approvalStatus === 'PENDING') {
         nextStatus = 'PENDING';
@@ -526,7 +540,8 @@ export async function updateSellerProduct(params: {
           : {}),
         ...(params.pageOrSheetCount ? { pageOrSheetCount: params.pageOrSheetCount } : {}),
         approvalStatus: nextStatus,
-        ...(nextStatus === 'PENDING' ? { rejectionReason: null } : {}),
+        ...(nextStatus === 'APPROVED' && !existing.publishedAt ? { publishedAt: new Date() } : {}),
+        ...(nextStatus === 'PENDING' || nextStatus === 'APPROVED' ? { rejectionReason: null } : {}),
         updatedAt: new Date(),
       })
       .where(eq(products.id, existing.id))
